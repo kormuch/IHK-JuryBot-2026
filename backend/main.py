@@ -25,7 +25,8 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from urllib.parse import urlparse
+from pydantic import BaseModel, field_validator, Field
 
 from backend.config import settings
 from backend.database import init_db, get_db
@@ -111,8 +112,32 @@ FRONTEND_DIR = PROJECT_ROOT / "frontend"
 # ─── Pydantic models ───────────────────────────────────────────────
 
 class TeamCreate(BaseModel):
-    name: str
-    repo_url: str | None = None
+    name: str = Field(..., min_length=1, max_length=100)
+    repo_url: str | None = Field(None, max_length=500)
+
+    @field_validator("name")
+    @classmethod
+    def sanitize_name(cls, v: str) -> str:
+        v = v.strip()
+        # Strip characters that could break LLM prompts
+        for ch in "\n\r\t<>\"'{}":
+            v = v.replace(ch, "")
+        if not v:
+            raise ValueError("Teamname darf nicht leer sein")
+        return v
+
+    @field_validator("repo_url")
+    @classmethod
+    def validate_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        parsed = urlparse(v)
+        if parsed.scheme not in ("https", "http"):
+            raise ValueError("Nur https:// und http:// URLs erlaubt")
+        if not parsed.netloc:
+            raise ValueError("Ungültige URL")
+        return v
 
 
 
@@ -565,9 +590,20 @@ async def export_results():
 
 # ─── Configuration ─────────────────────────────────────────────────
 
+def _check_admin_key(request: Request):
+    """Verify ADMIN_API_KEY if one is configured. No key set = open access (local dev)."""
+    configured_key = settings.ADMIN_API_KEY
+    if not configured_key:
+        return  # No key configured — allow access (local dev mode)
+    provided = request.headers.get("X-Admin-Key", "")
+    if provided != configured_key:
+        raise HTTPException(403, "Ungültiger Admin-Key")
+
+
 @app.get("/api/config")
-async def get_config():
+async def get_config(request: Request):
     """Return current bot configuration including prompts, provider, weights, voice."""
+    _check_admin_key(request)
     import backend.llm_service as llm_mod
     import backend.tts_service as tts_mod
 
@@ -594,8 +630,9 @@ async def get_config():
 
 
 @app.put("/api/config")
-async def update_config(config: ConfigUpdate):
+async def update_config(config: ConfigUpdate, request: Request):
     """Update bot configuration at runtime. Changes are NOT persisted to .env."""
+    _check_admin_key(request)
     import backend.llm_service as llm_mod
     import backend.tts_service as tts_mod
 

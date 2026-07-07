@@ -107,8 +107,11 @@ function render() {
 async function apiFetch(path, options = {}) {
     console.log(`[API] fetch ${options.method || 'GET'} ${API}${path}`);
     try {
+        const headers = { 'Content-Type': 'application/json', ...options.headers };
+        const adminKey = localStorage.getItem('admin_api_key');
+        if (adminKey) headers['X-Admin-Key'] = adminKey;
         const res = await fetch(`${API}${path}`, {
-            headers: { 'Content-Type': 'application/json', ...options.headers },
+            headers,
             ...options,
         });
         console.log(`[API] Response: ${res.status} ${res.statusText} für ${path}`);
@@ -517,8 +520,21 @@ async function renderConfig(app) {
     let config;
     try {
         config = await apiFetch('/config');
-    } catch {
-        app.innerHTML = '<div class="empty-state">Konfiguration konnte nicht geladen werden.</div>';
+    } catch (e) {
+        if (e.message?.includes('403')) {
+            app.innerHTML = `
+                <div class="section-header"><div class="section-title">Bot-Konfiguration</div></div>
+                <div class="config-section" style="max-width:400px">
+                    <div class="config-section-title">Admin-Zugang</div>
+                    <div class="form-group">
+                        <label>Admin-Key</label>
+                        <input type="password" id="cfg-admin-key" value="${esc(localStorage.getItem('admin_api_key') || '')}" placeholder="ADMIN_API_KEY aus .env">
+                    </div>
+                    <button class="btn btn-primary" onclick="localStorage.setItem('admin_api_key', document.getElementById('cfg-admin-key').value); renderConfig(document.getElementById('app'))">Entsperren</button>
+                </div>`;
+        } else {
+            app.innerHTML = '<div class="empty-state">Konfiguration konnte nicht geladen werden.</div>';
+        }
         return;
     }
 

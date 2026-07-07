@@ -30,6 +30,7 @@ class Settings:
     PORT: int = int(os.getenv("PORT", "8000"))
     REPOS_DIR: str = os.getenv("REPOS_DIR", "./repos")
     DEBUG_MODE: bool = os.getenv("DEBUG_MODE", "1").lower() in ("1", "true", "yes", "on")
+    ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "")
 
     @property
     def repos_path(self) -> Path:

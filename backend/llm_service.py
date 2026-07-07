@@ -266,10 +266,18 @@ class LLMService:
 
         return result
 
+    @staticmethod
+    def _sanitize_team_name(name: str) -> str:
+        """Strip characters that could inject prompt instructions."""
+        for ch in "\n\r\t<>\"'{}":
+            name = name.replace(ch, "")
+        return name[:100].strip()
+
     async def generate_speech_verdict(self, team_name: str, scores: dict, summary: str) -> str:
         """Generate a spoken jury verdict for TTS output."""
+        safe_name = self._sanitize_team_name(team_name)
         user_prompt = (
-            f"TEAMNAME: {team_name}\n\n"
+            f"TEAMNAME: {safe_name}\n\n"
             "BEWERTUNG:\n"
             f"{json.dumps(scores, indent=2, ensure_ascii=False)}\n\n"
             "ZUSAMMENFASSUNG AUS DER ANALYSE:\n"
@@ -370,9 +378,20 @@ class LLMService:
 
     @staticmethod
     def _sanitize_content(content: str, max_lines: int = 300) -> str:
-        """Truncate file content and strip suspicious instruction patterns."""
-        lines = content.split("\n")[:max_lines]
-        return "\n".join(lines)
+        """Truncate file content and strip suspicious injection patterns."""
+        filtered = []
+        for line in content.split("\n")[:max_lines]:
+            # Strip lines that attempt to close XML tags or inject system instructions
+            lower = line.lower().strip()
+            if lower.startswith("</repo_content") or lower.startswith("<repo_content"):
+                continue
+            filtered.append(line)
+        return "\n".join(filtered)
+
+    @staticmethod
+    def _escape_filepath(path: str) -> str:
+        """Escape filepath to prevent XML tag injection via filenames."""
+        return path.replace("<", "[").replace(">", "]").replace("\n", "").replace("\r", "")
 
     def _build_repo_prompt(self, analysis: dict) -> str:
         """Build a detailed prompt from repo analysis for evaluation.
@@ -446,7 +465,7 @@ class LLMService:
 
         parts.append("<repo_content>")
         parts.append("DATEIBAUM:")
-        parts.append("\n".join(f"  {f}" for f in structure["file_tree"][:100]))
+        parts.append("\n".join(f"  {self._escape_filepath(f)}" for f in structure["file_tree"][:100]))
         parts.append("")
         parts.append("WICHTIGE DATEIEN:")
 
@@ -454,7 +473,8 @@ class LLMService:
         files_included = 0
         for filepath, content in key_files.items():
             sanitized = self._sanitize_content(content)
-            entry = f"\n--- {filepath} ---\n{sanitized}"
+            safe_path = self._escape_filepath(filepath)
+            entry = f"\n--- {safe_path} ---\n{sanitized}"
             if chars_used + len(entry) > MAX_CONTENT_CHARS:
                 parts.append(f"\n... [{len(key_files) - files_included} weitere Dateien gekürzt — Token-Budget erreicht]")
                 break
