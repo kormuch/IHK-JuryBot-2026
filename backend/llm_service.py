@@ -89,6 +89,8 @@ dabei falsch ausgesprochen und klingen lächerlich. GRUNDREGEL:
 - Nicht "Framework", sondern "Rahmenwerk" oder den konkreten Namen nennen
 - Nicht "Pipeline", sondern "Verarbeitungskette"
 - Nicht "Routing", sondern "Weiterleitung"
+- Nicht "CRUD", sondern "Grundfunktionen" oder "Erstellen/Lesen/Ändern/Löschen"
+- Nicht "Fallback", sondern "Rückfalllösung" oder "Absicherung"
 - Nicht "State Management", sondern "Zustandsverwaltung"
 - Nicht "Responsive", sondern "bildschirmangepasst"
 - Nicht "Governance", sondern "Steuerung" oder "Regelwerk"
@@ -119,6 +121,9 @@ WICHTIG:
 - Referenziere KONKRETE Dateien und Features aus dem Code.
 - Die Gesamtzusammenfassung soll wie eine kurze Jury-Ansprache klingen (4-6 Sätze).
 - Der letzte Satz der Zusammenfassung soll IMMER positiv und ermutigend enden.
+- SPRACHRHYTHMUS: Ein Gedanke pro Satz. Kurze Sätze (max 15-18 Wörter).
+  Keine Aufzählungsketten. Keine verschachtelten Relativsätze. Atmen lassen.
+  Wenn du etwas benennst, erkläre im Folgesatz, was es konkret bewirkt.
 - Antworte ausschließlich mit validem JSON.
 
 Antwortformat:
@@ -142,19 +147,33 @@ formulieren. Kein Vorlesen von Zahlen, sondern ein natürliches Jury-Statement.
 STIL:
 - Sprich das Team direkt an (ihr/euer)
 - Beginne mit dem Gesamteindruck — eine klare Einordnung, kein Lob-Einstieg
-- Benenne Stärken konkret: "Was heraussticht, ist..."
-- Benenne Schwächen direkt: "Was fehlt, ist...", "Hier geht Anspruch und Umsetzung auseinander..."
+- Benenne Stärken konkret, benenne Schwächen direkt
 - Wenn das Projekt hinter seinem eigenen Anspruch zurückbleibt, sage es
 - Schließe mit einer positiven, ermutigenden Note — ehrlich, aber aufbauend
-- Länge: 6-10 Sätze, nicht länger
+- Länge: 12-20 Sätze
 - Kein JSON — reiner Fließtext, bereit für Sprachausgabe
+
+SPRACHRHYTHMUS — das ist entscheidend:
+- EIN Gedanke pro Satz. Nicht zwei Informationen mit Komma verbinden.
+- Kurze Sätze. Maximal 15-18 Wörter. Besser kürzer.
+- Keine Aufzählungsketten ("Klassifikation, Extraktion, Prüfung und Produktpass").
+  Stattdessen: einen Aspekt nennen, wirken lassen, dann den nächsten.
+- Atempausen einbauen. Nach einem wichtigen Punkt kommt ein neuer Satz, kein Semikolon.
+- Keine verschachtelten Relativsätze. Hauptsatz. Punkt. Nächster Hauptsatz.
+- WHAT IT IS + WHAT IT DOES: Wenn du ein Feature oder Konzept nennst, erkläre im
+  nächsten Satz sofort, was es konkret bewirkt. Nicht nur benennen — einordnen.
+  Beispiel: SCHLECHT: "Dazu kommt ein digitaler Produktpass."
+  GUT: "Dazu kommt ein digitaler Produktpass. Damit lässt sich nachverfolgen, woher ein Material stammt."
+  Das Publikum besteht nicht aus Entwicklern. Begriffe brauchen Kontext.
+- So sprechen Menschen. Nicht wie ein Gutachten. Wie jemand, der vor Leuten steht und redet.
 - ANGLIZISMEN STRIKT VERMEIDEN — der Text wird von deutscher Sprachausgabe vorgelesen.
   Nur Alltagsanglizismen (OK, Computer, Code, Software, App, Team, Server) sind erlaubt.
   Technisches Englisch und Business-Englisch MÜSSEN deutsch umschrieben werden:
   "Schnittstelle" statt API/Endpoint, "Oberfläche" statt Frontend, "Funktion" statt Feature,
   "Bedienbarkeit" statt Usability, "Regelkonformität" statt Compliance, "Steuerung" statt Governance,
   "Leistung" statt Performance, "Arbeitsablauf" statt Workflow, "Übersicht" statt Dashboard,
-  "Rückmeldung" statt Feedback, "Werkzeug" statt Tool, "Umfang" statt Scope.
+  "Rückmeldung" statt Feedback, "Werkzeug" statt Tool, "Umfang" statt Scope,
+  "Grundfunktionen" statt CRUD, "Rückfalllösung" statt Fallback.
   Im Zweifel: deutsch umschreiben. Dateinamen (main.py, app.js) sind erlaubt.
 
 Antwortformat (JSON):
@@ -406,6 +425,18 @@ class LLMService:
             if evidence.get("readme_vs_code", {}).get("gaps"):
                 gaps = evidence["readme_vs_code"]["gaps"][:10]
                 parts.append(f"  README-Lücken (erwähnt aber nicht im Code): {', '.join(gaps)}")
+
+            # Code-Index: vollständige Liste aller Funktionen/Klassen aus ALLEN Dateien
+            code_index = evidence.get("code_index", [])
+            if code_index:
+                parts.append("")
+                parts.append(f"  VOLLSTÄNDIGER CODE-INDEX ({len(code_index)} Symbole aus ALLEN Dateien):")
+                parts.append("  WICHTIG: Wenn ein Symbol hier aufgelistet ist, EXISTIERT es definitiv im Code.")
+                parts.append("  Behaupte NIEMALS, ein Feature fehle, wenn es hier als Symbol auftaucht.")
+                for entry in code_index[:200]:  # max 200 symbols to stay within budget
+                    parts.append(f"    {entry}")
+                if len(code_index) > 200:
+                    parts.append(f"    ... [{len(code_index) - 200} weitere Symbole]")
 
             parts.append("")
 

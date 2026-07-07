@@ -249,13 +249,13 @@ async def _run_analysis(team_id: int):
             target = str(settings.repos_path / f"team_{team_id}")
 
             if repo_url:
-                logger.info("[ANALYSE t%d] SCHRITT 1/3: git clone %s → %s", team_id, repo_url, target)
+                logger.info("[ANALYSE t%d] SCHRITT 1/5: git clone %s → %s", team_id, repo_url, target)
                 t1 = time.time()
                 repo_path = await clone_repo(repo_url, target)
-                logger.info("[ANALYSE t%d] SCHRITT 1/3: Clone OK (%.1fs) → %s", team_id, time.time() - t1, repo_path)
+                logger.info("[ANALYSE t%d] SCHRITT 1/5: Clone OK (%.1fs) → %s", team_id, time.time() - t1, repo_path)
             elif team.get("repo_path"):
                 repo_path = team["repo_path"]
-                logger.info("[ANALYSE t%d] SCHRITT 1/3: Kein Clone nötig, nutze existierenden Pfad: %s", team_id, repo_path)
+                logger.info("[ANALYSE t%d] SCHRITT 1/5: Kein Clone nötig, nutze existierenden Pfad: %s", team_id, repo_path)
             else:
                 raise ValueError("Keine repo_url und kein repo_path gesetzt")
 
@@ -265,14 +265,14 @@ async def _run_analysis(team_id: int):
             await db.commit()
 
             # Schritt 2: Repo scannen
-            logger.info("[ANALYSE t%d] SCHRITT 2/3: Repo scannen...", team_id)
+            logger.info("[ANALYSE t%d] SCHRITT 2/5: Repo scannen...", team_id)
             t2 = time.time()
             analysis = await analyze_repo(repo_path)
             summary = analysis["summary"]
             key_files_count = len(analysis["key_files"])
             key_files_chars = sum(len(v) for v in analysis["key_files"].values())
             logger.info(
-                "[ANALYSE t%d] SCHRITT 2/3: Scan OK (%.1fs) — %d Dateien, %d Zeilen, %d Key-Files (%d chars), Sprachen: %s, Frameworks: %s",
+                "[ANALYSE t%d] SCHRITT 2/5: Scan OK (%.1fs) — %d Dateien, %d Zeilen, %d Key-Files (%d chars), Sprachen: %s, Frameworks: %s",
                 team_id, time.time() - t2, summary["total_files"], summary["total_lines"],
                 key_files_count, key_files_chars,
                 json.dumps(summary["languages"], ensure_ascii=False),
@@ -280,10 +280,10 @@ async def _run_analysis(team_id: int):
             )
 
             # Schritt 3: LLM Evaluation
-            logger.info("[ANALYSE t%d] SCHRITT 3/3: LLM Evaluation (Provider: %s)...", team_id, settings.LLM_PROVIDER)
+            logger.info("[ANALYSE t%d] SCHRITT 3/5: LLM Evaluation (Provider: %s)...", team_id, settings.LLM_PROVIDER)
             t3 = time.time()
             scores = await llm.evaluate_repo(analysis)
-            logger.info("[ANALYSE t%d] SCHRITT 3/3: LLM OK (%.1fs) — Scores: %s",
+            logger.info("[ANALYSE t%d] SCHRITT 3/5: LLM OK (%.1fs) — Scores: %s",
                 team_id, time.time() - t3,
                 {k: v.get("score", v) if isinstance(v, dict) else v for k, v in scores.get("scores", {}).items()},
             )
@@ -319,13 +319,10 @@ async def _run_analysis(team_id: int):
                     final_score,
                 ),
             )
-            await db.execute(
-                "UPDATE teams SET status = ?, error_message = NULL WHERE id = ?", ("analyzed", team_id)
-            )
             await db.commit()
 
             # Schritt 4: Verdict-Text automatisch generieren
-            logger.info("[ANALYSE t%d] SCHRITT 4/4: Verdict-Text generieren...", team_id)
+            logger.info("[ANALYSE t%d] SCHRITT 4/5: Verdict-Text generieren...", team_id)
             t4 = time.time()
             try:
                 justifications_map = {k: v.get("justification", "") for k, v in score_data.items()}
@@ -344,13 +341,35 @@ async def _run_analysis(team_id: int):
                         "UPDATE analyses SET verdict_text = ? WHERE id = ?",
                         (verdict, analysis_row["id"]),
                     )
-                    await db.commit()
-                logger.info("[ANALYSE t%d] SCHRITT 4/4: Verdict OK (%.1fs, %d Zeichen)",
+                logger.info("[ANALYSE t%d] SCHRITT 4/5: Verdict OK (%.1fs, %d Zeichen)",
                     team_id, time.time() - t4, len(verdict))
             except Exception as ve:
-                logger.warning("[ANALYSE t%d] SCHRITT 4/4: Verdict fehlgeschlagen (%.1fs): %s",
+                logger.warning("[ANALYSE t%d] SCHRITT 4/5: Verdict fehlgeschlagen (%.1fs): %s",
                     team_id, time.time() - t4, ve)
 
+            # Schritt 5: TTS Audio automatisch generieren
+            if analysis_row and verdict:
+                logger.info("[ANALYSE t%d] SCHRITT 5/5: TTS Audio generieren...", team_id)
+                t5 = time.time()
+                try:
+                    tts_filename = f"verdict_team_{team_id}_{uuid.uuid4().hex[:8]}.mp3"
+                    tts_path = str(TTS_DIR / tts_filename)
+                    await generate_speech(verdict, tts_path)
+                    audio_url = f"/tts_output/{tts_filename}"
+                    await db.execute(
+                        "UPDATE analyses SET audio_url = ? WHERE id = ?",
+                        (audio_url, analysis_row["id"]),
+                    )
+                    logger.info("[ANALYSE t%d] SCHRITT 5/5: TTS OK (%.1fs) → %s", team_id, time.time() - t5, audio_url)
+                except Exception as te:
+                    logger.warning("[ANALYSE t%d] SCHRITT 5/5: TTS fehlgeschlagen (%.1fs): %s",
+                        team_id, time.time() - t5, te)
+
+            # Status NACH Verdict+TTS setzen — Frontend pollt auf diesen Status
+            await db.execute(
+                "UPDATE teams SET status = ?, error_message = NULL WHERE id = ?", ("analyzed", team_id)
+            )
+            await db.commit()
             logger.info("[ANALYSE t%d] ====== FERTIG (%.1fs gesamt) ======", team_id, time.time() - t_start)
 
         except Exception as e:

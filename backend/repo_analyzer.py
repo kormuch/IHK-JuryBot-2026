@@ -5,7 +5,8 @@ Pipeline:
     1. clone_repo()      — git clone --depth 1 (or pull if already cloned)
     2. scan_structure()   — walk directory, detect languages/frameworks/entry points
     3. read_key_files()   — read up to 50 key files (500 lines max each), prioritized by relevance
-    4. analyze_repo()     — combines 2+3 into a structured dict for LLM evaluation
+    4. scan_all_symbols() — extract function/class names from ALL source files (full repo)
+    5. analyze_repo()     — combines 2+3+4 into a structured dict for LLM evaluation
 
 Skips: .git, node_modules, __pycache__, binaries, images, lock files.
 """
@@ -13,6 +14,7 @@ Skips: .git, node_modules, __pycache__, binaries, images, lock files.
 import asyncio
 import logging
 import os
+import re
 from pathlib import Path
 from collections import Counter
 
@@ -304,11 +306,72 @@ async def read_key_files(repo_path: str, structure: dict) -> dict:
     return result
 
 
-def build_evidence_report(repo_path: str, structure: dict, key_files: dict) -> dict:
+_SYMBOL_PATTERNS = [
+    # Python: def func_name(  /  class ClassName
+    re.compile(r'^\s*def\s+(\w+)\s*\('),
+    re.compile(r'^\s*class\s+(\w+)'),
+    # JS/TS: function funcName(  /  export function  /  export default function
+    re.compile(r'^\s*(?:export\s+(?:default\s+)?)?function\s+(\w+)\s*\('),
+    # JS/TS: const funcName = (  /  export const funcName =
+    re.compile(r'^\s*(?:export\s+(?:default\s+)?)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\('),
+    # JS/TS arrow: const Component = () =>  /  const handler = async () =>
+    re.compile(r'^\s*(?:export\s+(?:default\s+)?)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?\([^)]*\)\s*=>'),
+    # Java/C#/Go: public void methodName(  /  func methodName(
+    re.compile(r'^\s*(?:public|private|protected|static|async|func)\s+\w*\s*(\w+)\s*\('),
+    # React component: export default function Component(  — already covered above
+    # Go: type StructName struct
+    re.compile(r'^\s*type\s+(\w+)\s+struct'),
+    # Rust: fn func_name(  /  struct StructName  /  impl TraitName
+    re.compile(r'^\s*(?:pub\s+)?fn\s+(\w+)\s*[<(]'),
+    re.compile(r'^\s*(?:pub\s+)?struct\s+(\w+)'),
+]
+
+# Skip trivial/boilerplate symbol names
+_SKIP_SYMBOLS = {
+    "__init__", "main", "setUp", "tearDown", "setup", "teardown",
+    "constructor", "render", "toString", "equals", "hashCode",
+}
+
+SOURCE_EXTS = {".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rs", ".rb", ".php", ".cs", ".cpp", ".c"}
+
+
+def scan_all_symbols(repo_path: str, file_tree: list[str]) -> list[dict]:
+    """Scan ALL source files in repo for function/class names.
+    Returns list of {name, file, line} dicts — the complete code index."""
+    root = Path(repo_path)
+    symbols = []
+
+    for rel_path in file_tree:
+        ext = Path(rel_path).suffix.lower()
+        if ext not in SOURCE_EXTS:
+            continue
+
+        full_path = root / rel_path
+        try:
+            content = full_path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+
+        for line_no, line in enumerate(content.splitlines(), 1):
+            for pat in _SYMBOL_PATTERNS:
+                m = pat.match(line)
+                if m:
+                    name = m.group(1)
+                    if name not in _SKIP_SYMBOLS and len(name) > 2:
+                        symbols.append({
+                            "name": name,
+                            "file": rel_path,
+                            "line": line_no,
+                        })
+                    break  # one match per line
+
+    return symbols
+
+
+def build_evidence_report(repo_path: str, structure: dict, key_files: dict, all_symbols: list[dict] | None = None) -> dict:
     """Extract structured facts from a repo without LLM involvement.
     Returns a dict of evidence sections that can be fed to the LLM
     instead of (or alongside) raw code."""
-    import re
 
     # --- 1. readme_claims ---
     readme_claims = []
@@ -418,22 +481,35 @@ def build_evidence_report(repo_path: str, structure: dict, key_files: dict) -> d
         "has_real_assertions": has_real_assertions,
     }
 
-    # --- 7. functions_classes ---
-    fn_count = 0
-    cls_count = 0
-    for filepath, content in key_files.items():
-        ext = Path(filepath).suffix.lower()
-        if ext not in (".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rs", ".rb", ".php", ".cs", ".cpp", ".c"):
-            continue
-        for line in content.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("def ") or stripped.startswith("function "):
-                fn_count += 1
-            if stripped.startswith("class "):
-                cls_count += 1
+    # --- 7. functions_classes (from full symbol scan if available) ---
+    if all_symbols:
+        # Use the full repo scan — counts ALL source files, not just key_files
+        fn_names = {s["name"] for s in all_symbols}
+        # Heuristic: PascalCase = class/component, snake_case/camelCase = function
+        cls_count = sum(1 for s in all_symbols if s["name"][0].isupper())
+        fn_count = len(all_symbols) - cls_count
+    else:
+        fn_count = 0
+        cls_count = 0
+        for filepath, content in key_files.items():
+            ext = Path(filepath).suffix.lower()
+            if ext not in SOURCE_EXTS:
+                continue
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("def ") or stripped.startswith("function "):
+                    fn_count += 1
+                if stripped.startswith("class "):
+                    cls_count += 1
     functions_classes = {"functions": fn_count, "classes": cls_count}
 
-    # --- 8. readme_vs_code ---
+    # --- 8. code_index (complete function/class listing from ALL files) ---
+    code_index = []
+    if all_symbols:
+        for s in all_symbols:
+            code_index.append(f"{s['name']}  ({s['file']}:{s['line']})")
+
+    # --- 9. readme_vs_code ---
     # Extract feature keywords from readme claims (nouns after bullets)
     feature_keywords = []
     stop_words = {
@@ -451,12 +527,18 @@ def build_evidence_report(repo_path: str, structure: dict, key_files: dict) -> d
             if w not in stop_words and w not in feature_keywords:
                 feature_keywords.append(w)
 
-    # Check which keywords appear in code
+    # Check which keywords appear in code — scan ALL source files, not just key_files
     all_code = ""
-    for filepath, content in key_files.items():
+    root = Path(repo_path)
+    for filepath in structure["file_tree"]:
         ext = Path(filepath).suffix.lower()
-        if ext in (".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rs"):
+        if ext not in SOURCE_EXTS:
+            continue
+        try:
+            content = (root / filepath).read_text(encoding="utf-8", errors="ignore")
             all_code += content.lower() + "\n"
+        except OSError:
+            pass
 
     implemented = []
     gaps = []
@@ -480,12 +562,13 @@ def build_evidence_report(repo_path: str, structure: dict, key_files: dict) -> d
         "empty_files": empty_files,
         "test_coverage": test_coverage,
         "functions_classes": functions_classes,
+        "code_index": code_index,
         "readme_vs_code": readme_vs_code,
     }
 
 
 async def analyze_repo(repo_path: str) -> dict:
-    """Full pipeline: scan structure + read key files + build analysis summary."""
+    """Full pipeline: scan structure + read key files + symbol scan + build analysis summary."""
     logger.info("analyze_repo: Starte für %s", repo_path)
     structure = await scan_structure(repo_path)
     logger.info("analyze_repo: Scan fertig — %d Dateien, %d Zeilen", len(structure["file_tree"]), structure.get("total_lines", 0))
@@ -493,7 +576,11 @@ async def analyze_repo(repo_path: str) -> dict:
     logger.info("analyze_repo: %d Key-Files gelesen (%d chars gesamt)",
         len(key_files), sum(len(v) for v in key_files.values()))
 
-    evidence = build_evidence_report(repo_path, structure, key_files)
+    all_symbols = scan_all_symbols(repo_path, structure["file_tree"])
+    logger.info("analyze_repo: %d Symbole in %d Dateien gefunden (Full-Scan)",
+        len(all_symbols), len({s["file"] for s in all_symbols}))
+
+    evidence = build_evidence_report(repo_path, structure, key_files, all_symbols)
 
     return {
         "structure": structure,

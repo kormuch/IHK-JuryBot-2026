@@ -406,7 +406,7 @@ async function renderAnalysisTab(team) {
     }
 
     container.innerHTML = `
-        ${analysis.repo_summary ? `<div class="repo-summary mb-24"><pre>${esc(typeof analysis.repo_summary === 'object' ? JSON.stringify(analysis.repo_summary, null, 2) : analysis.repo_summary)}</pre></div>` : ''}
+        ${analysis.repo_summary ? `<details class="repo-summary-details mb-24"><summary class="repo-summary-toggle">Technische Details</summary><pre class="repo-summary-pre">${esc(typeof analysis.repo_summary === 'object' ? JSON.stringify(analysis.repo_summary, null, 2) : analysis.repo_summary)}</pre></details>` : ''}
         <div class="section-title mb-16">Bewertung</div>
         ${scoresHTML}
     `;
@@ -416,21 +416,25 @@ async function renderAnalysisTab(team) {
 async function renderSessionTab(team) {
     const container = document.getElementById('team-tab-content');
 
-    // Load existing verdict from analysis
+    // Always fetch fresh — verdict_text/audio_url may have been added after initial cache
     let verdictText = '';
+    let audioUrl = '';
     try {
-        const analysis = analysisCache[team.id] || await getAnalysis(team.id);
+        const analysis = await getAnalysis(team.id);
         verdictText = analysis?.verdict_text || '';
+        audioUrl = analysis?.audio_url || '';
     } catch { /* ignore */ }
+
+    const bUrl = API.replace('/api', '');
+    const fullAudioUrl = audioUrl ? `${bUrl}${audioUrl}` : '';
 
     container.innerHTML = `
         <div class="section-title mb-16">Jury-Urteil</div>
         <div class="flex gap-12 mb-16">
-            <button class="btn btn-secondary" onclick="handleGenerateVerdict(${team.id})">&#8635; Neu generieren</button>
-            <button class="btn btn-primary" onclick="handleSpeakVerdict(${team.id})" id="btn-speak-verdict" ${verdictText ? '' : 'disabled'}>&#127911; Vorlesen</button>
+            <button class="btn btn-secondary" onclick="handleRegenerateAll(${team.id})">&#8635; Neu generieren</button>
         </div>
         <div id="verdict-text" class="mt-8">${verdictText ? `<div class="verdict-card"><p>${esc(verdictText)}</p></div>` : '<div class="empty-state">Kein Urteil vorhanden. Wird automatisch bei der Analyse generiert.</div>'}</div>
-        <div id="verdict-player" class="mt-8"></div>
+        <div id="verdict-player" class="mt-8">${fullAudioUrl ? `<audio controls src="${fullAudioUrl}"></audio>` : ''}</div>
     `;
 
     if (verdictText) lastVerdictText = verdictText;
@@ -662,41 +666,48 @@ async function handleTestVoice() {
 // ── TTS / Verdict ─────────────────────────────────────
 let lastVerdictText = '';
 
-async function handleGenerateVerdict(teamId) {
+async function handleRegenerateAll(teamId) {
+    const verdictDiv = document.getElementById('verdict-text');
+    const player = document.getElementById('verdict-player');
+
+    // Show progress bar
+    if (verdictDiv) {
+        verdictDiv.innerHTML = `
+            <div class="verdict-progress">
+                <div class="verdict-progress-label">Urteil wird generiert...</div>
+                <div class="progress-bar"><div class="progress-bar-fill" id="verdict-progress-fill" style="width: 30%"></div></div>
+            </div>`;
+    }
+    if (player) player.innerHTML = '';
+
     try {
-        showToast('Urteil wird neu generiert...', 'info');
+        // Step 1: Generate verdict text
         const data = await generateVerdictText(teamId);
         lastVerdictText = data.text || '';
         delete analysisCache[teamId];
-        const verdictDiv = document.getElementById('verdict-text');
+
         if (verdictDiv && lastVerdictText) {
             verdictDiv.innerHTML = `<div class="verdict-card"><p>${esc(lastVerdictText)}</p></div>`;
         }
-        const btn = document.getElementById('btn-speak-verdict');
-        if (btn) btn.disabled = false;
-        showToast('Urteil generiert', 'success');
-    } catch { /* toast */ }
-}
 
-async function handleSpeakVerdict(teamId) {
-    try {
-        showToast('Audio wird erzeugt...', 'info');
-        const data = await generateVerdictTTS(teamId);
-        const baseUrl = API.replace('/api', '');
-        const audioUrl = data.audio_url ? `${baseUrl}${data.audio_url}` : '';
-        const player = document.getElementById('verdict-player');
+        // Step 2: Generate TTS
         if (player) {
-            player.innerHTML = `<audio controls autoplay src="${audioUrl}"></audio>`;
+            player.innerHTML = `
+                <div class="verdict-progress">
+                    <div class="verdict-progress-label">Audio wird erzeugt...</div>
+                    <div class="progress-bar"><div class="progress-bar-fill" style="width: 60%; animation: progress-pulse 1.5s ease-in-out infinite"></div></div>
+                </div>`;
         }
-        // Update text if it changed
-        if (data.text) {
-            lastVerdictText = data.text;
-            const verdictDiv = document.getElementById('verdict-text');
-            if (verdictDiv) {
-                verdictDiv.innerHTML = `<div class="verdict-card"><div class="section-title mb-8">Jury-Urteil</div><p>${esc(data.text)}</p></div>`;
-            }
+        const ttsData = await generateVerdictTTS(teamId);
+        const bUrl = API.replace('/api', '');
+        const audioUrl = ttsData.audio_url ? `${bUrl}${ttsData.audio_url}` : '';
+        if (player && audioUrl) {
+            player.innerHTML = `<audio controls src="${audioUrl}"></audio>`;
         }
-    } catch { /* toast */ }
+        showToast('Urteil + Audio fertig', 'success');
+    } catch (e) {
+        showToast('Fehler: ' + (e.message || e), 'error');
+    }
 }
 
 

@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS analyses (
     justifications TEXT,
     final_score REAL,
     verdict_text TEXT,
+    audio_url TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
 );
@@ -42,6 +43,7 @@ _MIGRATIONS = [
     "ALTER TABLE teams ADD COLUMN error_message TEXT",
     "ALTER TABLE analyses ADD COLUMN final_score REAL",
     "ALTER TABLE analyses ADD COLUMN verdict_text TEXT",
+    "ALTER TABLE analyses ADD COLUMN audio_url TEXT",
 ]
 
 

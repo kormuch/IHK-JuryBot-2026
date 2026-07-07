@@ -85,6 +85,9 @@ _ANGLICISM_MAP = [
     ("Callbacks", "Rückrufe"),
     ("Callback", "Rückruf"),
     ("Lifecycle", "Lebenszyklus"),
+    ("CRUD", "Grundfunktionen"),
+    ("Fallback", "Rückfalllösung"),
+    ("Fallbacks", "Rückfalllösungen"),
 ]
 
 
