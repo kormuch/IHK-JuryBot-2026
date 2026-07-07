@@ -1,0 +1,11 @@
+.env
+jurybot.db
+jurybot.db-journal
+jurybot.log
+*.log
+repos/
+tts_output/
+__pycache__/
+*.pyc
+.venv/
+venv/

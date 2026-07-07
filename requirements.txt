@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+httpx
+groq
+google-genai
+edge-tts
+aiofiles
+aiosqlite
