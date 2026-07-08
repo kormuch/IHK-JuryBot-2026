@@ -436,7 +436,7 @@ async function renderSessionTab(team) {
         <div class="flex gap-12 mb-16">
             <button class="btn btn-secondary" onclick="handleRegenerateAll(${team.id})">&#8635; Neu generieren</button>
         </div>
-        <div id="verdict-text" class="mt-8">${verdictText ? `<div class="verdict-card"><p>${esc(verdictText)}</p></div>` : '<div class="empty-state">Kein Urteil vorhanden. Wird automatisch bei der Analyse generiert.</div>'}</div>
+        <div id="verdict-text" class="mt-8">${verdictText ? `<details class="verdict-card"><summary>Urteilstext anzeigen</summary><p>${esc(verdictText)}</p></details>` : '<div class="empty-state">Kein Urteil vorhanden. Wird automatisch bei der Analyse generiert.</div>'}</div>
         <div id="verdict-player" class="mt-8">${fullAudioUrl ? `<audio controls src="${fullAudioUrl}"></audio>` : ''}</div>
     `;
 
@@ -703,7 +703,7 @@ async function handleRegenerateAll(teamId) {
         delete analysisCache[teamId];
 
         if (verdictDiv && lastVerdictText) {
-            verdictDiv.innerHTML = `<div class="verdict-card"><p>${esc(lastVerdictText)}</p></div>`;
+            verdictDiv.innerHTML = `<details class="verdict-card"><summary>Urteilstext anzeigen</summary><p>${esc(lastVerdictText)}</p></details>`;
         }
 
         // Step 2: Generate TTS

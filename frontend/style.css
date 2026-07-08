@@ -889,10 +889,20 @@ textarea {
     border-radius: 8px;
     padding: 16px;
 }
+.verdict-card summary {
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: rgba(255,255,255,0.6);
+    user-select: none;
+}
+.verdict-card summary:hover {
+    color: rgba(255,255,255,0.9);
+}
 .verdict-card p {
     font-size: 0.9rem;
     line-height: 1.6;
     color: rgba(255,255,255,0.8);
+    margin-top: 12px;
 }
 
 /* Repo summary collapsible */
